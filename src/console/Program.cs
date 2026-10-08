@@ -49,7 +49,7 @@ internal class Program
             var card = cards[i];
             Console.WriteLine();
             Console.WriteLine(new string('=', 80));
-            await AskAsync(card, llm, model, log);
+            await AskAsync(i, card, llm, model, log);
         }
 
         ShowStatistics(log);
@@ -105,9 +105,9 @@ internal class Program
         return cards;
     }
 
-    private static async Task<bool> AskAsync(Card card, LlmClient llm, string model, Log log)
+    private static async Task<bool> AskAsync(int index, Card card, LlmClient llm, string model, Log log)
     {
-        Console.WriteLine(card.Question);
+        Console.WriteLine($"Question {index + 1}: {card.Question}");
         Console.Write("> ");
         var answer = Console.ReadLine() ?? "";
 
@@ -165,55 +165,6 @@ internal class Program
         foreach (var group in histogram)
         {
             Console.WriteLine($"    {group.Key,-10}: {group.Value,-4} ({group.Percentage:F2}%)");
-        }
-    }
-}
-
-
-public static class SamplingExtensions
-{
-    extension(Random rng)
-    {
-        public int[] SampleProportional(ReadOnlySpan<float> weights, int k)
-        {
-            int n = weights.Length;
-            ArgumentOutOfRangeException.ThrowIfNegative(k);
-            ArgumentOutOfRangeException.ThrowIfGreaterThan(k, n);
-
-            double total = 0; // accumulate in double to limit rounding error
-            foreach (float w in weights)
-            {
-                if (!(w >= 0) || float.IsInfinity(w))
-                    throw new ArgumentOutOfRangeException(nameof(weights));
-                total += w;
-            }
-            if (k == 0) return [];
-
-            double step = total / k;
-            foreach (float w in weights)
-                if (w > step * (1 + 1e-5)) // tolerate float rounding from the caller's capping
-                    throw new ArgumentException("Weight too large for exact proportional inclusion.");
-
-            int[] order = new int[n];
-            for (int i = 0; i < n; i++) order[i] = i;
-            rng.Shuffle(order);                     // randomizes which items co-occur
-
-            var result = new int[k];
-            double u = rng.NextDouble() * step;     // first point
-            double cum = 0;
-            int j = 0;
-            for (int t = 0; t < n && j < k; t++)
-            {
-                int i = order[t];
-                // treat the last segment as open-ended to absorb rounding error
-                cum = t == n - 1 ? double.PositiveInfinity : cum + weights[i];
-                if (u < cum)                         // at most one point per segment
-                {
-                    result[j++] = i;
-                    u += step;
-                }
-            }
-            return result;
         }
     }
 }
