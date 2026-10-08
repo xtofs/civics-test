@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -42,8 +43,12 @@ internal sealed class LlmClient : IDisposable
     public async Task<Grade?> GradeAsync(Card card, string answer, string model)
     {
         // Cheap deterministic path: a single-item answer that exactly matches an accepted entry.
-        if (card.RequiredCount == 1 && card.Accepted.Any(a => Normalize(a) == Normalize(answer) && Normalize(a).Length > 0))
-            return new Grade(Verdict.Correct, [], [], "Exact match.");
+        if (card.RequiredCount == 1)
+        {
+            var normalizedAnswer = Normalize(answer);
+            if (normalizedAnswer.Length > 0 && card.Accepted.Any(a => Normalize(a) == normalizedAnswer))
+                return new Grade(Verdict.Correct, [], [], "Exact match.");
+        }
 
         var schema = new JsonObject
         {
@@ -123,12 +128,53 @@ internal sealed class LlmClient : IDisposable
         return ParseGradeResponse(body);
     }
 
+    // private static string Normalize(string s)
+    // {
+    //     var words = new string(s.ToLowerInvariant().Select(c => char.IsLetterOrDigit(c) ? c : ' ').ToArray())
+    //         .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+    //         .Where(w => w is not ("the" or "a" or "an"));
+    //     return string.Join(' ', words);
+    // }
+
+    // Lowercases, turns every non-letter/digit run into a single space, and drops the articles "the", "a", "an".
+    // Single pass over the input into a scratch buffer; the result string is the only allocation for typical lengths.
     private static string Normalize(string s)
     {
-        var words = new string(s.ToLowerInvariant().Select(c => char.IsLetterOrDigit(c) ? c : ' ').ToArray())
-            .Split(' ', StringSplitOptions.RemoveEmptyEntries)
-            .Where(w => w is not ("the" or "a" or "an"));
-        return string.Join(' ', words);
+        const int StackLimit = 256;
+        char[]? rented = null;
+        Span<char> dst = s.Length <= StackLimit
+            ? stackalloc char[StackLimit]
+            : (rented = ArrayPool<char>.Shared.Rent(s.Length));
+        try
+        {
+            var len = 0;        // chars written to dst
+            var wordStart = -1; // index in dst where the current word starts, -1 when between words
+
+            for (var i = 0; i <= s.Length; i++)
+            {
+                if (i < s.Length && char.IsLetterOrDigit(s[i]))
+                {
+                    if (wordStart < 0)
+                    {
+                        if (len > 0) dst[len++] = ' ';
+                        wordStart = len;
+                    }
+                    dst[len++] = char.ToLowerInvariant(s[i]);
+                }
+                else if (wordStart >= 0)
+                {
+                    if (dst[wordStart..len] is "the" or "a" or "an")
+                        len = wordStart > 0 ? wordStart - 1 : 0; // drop the article and the space before it
+                    wordStart = -1;
+                }
+            }
+
+            return len == 0 ? "" : new string(dst[..len]);
+        }
+        finally
+        {
+            if (rented is not null) ArrayPool<char>.Shared.Return(rented);
+        }
     }
 
     private static Grade? ParseGradeResponse(string body)
