@@ -148,10 +148,10 @@ internal sealed class LlmClient : IDisposable
     // Single pass over the input into a scratch buffer; the result string is the only allocation for typical lengths.
     private static string Normalize(string s)
     {
-        // Allocate a buffer either on the stack or from the pool depending on the string length.
+        // Allocate a buffer either on the stack or from the shared pool depending on the string length.
         using var lease = s.Length > NormalizeStackLimit ?
-            Lease<char>.FromPool(ArrayPool<char>.Shared, s.Length) :
-            Lease<char>.FromStack(stackalloc char[NormalizeStackLimit]);
+            Lease<char>.FromPool(s.Length) :
+            Lease<char>.FromStack(stackalloc char[s.Length]);
 
         var dst = lease.Span;
 

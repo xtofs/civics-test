@@ -14,17 +14,16 @@ abstract record Card(string Question)
     /// <summary>How many distinct valid items the student must give.</summary>
     public abstract int RequiredCount { get; }
 
-    /// <summary>Validates a library entry: it needs either "answer", or "accepted" plus "count".</summary>
-    internal static Card From(LibraryCard x)
+    /// <summary>Validates a library question: non-empty "answers" and a "count" of 1..answers.Length.</summary>
+    internal static Card From(LibraryQuestion x)
     {
-        if (x.Answer is not null && x.Accepted is null && x.Count is null)
-            return new SingleAnswerCard(x.Question, x.Answer);
+        if (x.Answers is not { Count: > 0 } || x.Answers.Any(string.IsNullOrWhiteSpace) || x.Count < 1 || x.Count > x.Answers.Count)
+            throw new JsonException(
+                $"Question {x.Number} \"{x.Question}\": needs non-empty \"answers\" and \"count\" in 1..answers.Length.");
 
-        if (x.Answer is null && x.Accepted is { Count: > 0 } && x.Count is >= 1 && x.Count <= x.Accepted.Count)
-            return new MultiAnswerCard(x.Question, x.Accepted, x.Count.Value);
-
-        throw new JsonException(
-            $"Card \"{x.Question}\": use either \"answer\", or \"accepted\" (non-empty) with \"count\" (1..accepted.Length).");
+        return x.Answers.Count == 1
+            ? new SingleAnswerCard(x.Question, x.Answers[0])
+            : new MultiAnswerCard(x.Question, x.Answers, x.Count);
     }
 }
 

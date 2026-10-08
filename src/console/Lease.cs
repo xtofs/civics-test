@@ -1,26 +1,55 @@
 using System.Buffers;
 
-// A scratch buffer that is either stack memory or an array rented from a pool; Dispose returns a rented array.
+/// <summary>
+/// A lease represents a temporary buffer that can either be stack-allocated or rented from an array pool.
+/// This allows for efficient temporary storage without frequent allocations.
+/// When the lease is disposed, any rented array is returned to the pool.
+/// </summary>
+/// <typeparam name="T"></typeparam>
 readonly ref struct Lease<T> : IDisposable
 {
-    private readonly ArrayPool<T>? _pool;
+    private readonly ArrayPool<T>? _pool = ArrayPool<T>.Shared;
+
     private readonly T[]? _rented;
 
     public Span<T> Span { get; }
 
-    private Lease(ArrayPool<T>? pool, T[]? rented, Span<T> span)
+    /// <summary>
+    /// the constructor that rents an array from the pool
+    /// </summary>
+    private Lease(int length)
     {
-        _pool = pool;
-        _rented = rented;
+        _rented = _pool.Rent(length);
+        Span = _rented;
+    }
+
+    /// <summary>
+    /// the constructor that uses stack memory handed to it
+    /// </summary>
+    private Lease(Span<T> span)
+    {
+        _rented = null!;
         Span = span;
     }
 
-    public static Lease<T> FromStack(Span<T> span) => new(null, null, span);
-
-    public static Lease<T> FromPool(ArrayPool<T> pool, int length)
+    /// <summary>
+    /// static factory method to create a Lease from stack memory
+    /// </summary>
+    /// <param name="span"></param>
+    /// <returns></returns>
+    public static Lease<T> FromStack(Span<T> span)
     {
-        var rented = pool.Rent(length);
-        return new(pool, rented, rented);
+        return new Lease<T>(span);
+    }
+
+    /// <summary>
+    /// static factory method to create a Lease from the array pool
+    /// </summary>
+    /// <param name="length"></param>
+    /// <returns></returns>
+    public static Lease<T> FromPool(int length)
+    {
+        return new Lease<T>(length);
     }
 
     public void Dispose()

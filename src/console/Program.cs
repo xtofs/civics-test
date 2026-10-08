@@ -39,9 +39,9 @@ internal class Program
 
 
         var library = LoadCardLibrary();
-        var weights = CardWeights(library.Cards, log.LoadLogEntries());
+        var weights = CardWeights(library.Questions, log.LoadLogEntries());
         var picked = Random.Shared.SampleProportional(weights, Math.Min(SessionSize, weights.Length));
-        var cards = picked.Select(i => Card.From(library.Cards[i])).ToList();
+        var cards = picked.Select(i => Card.From(library.Questions[i])).ToList();
 
         Console.WriteLine($"testing {SessionSize} random cards");
         for (int i = 0; i < SessionSize; i++)
@@ -55,7 +55,7 @@ internal class Program
         ShowStatistics(log);
     }
 
-    private const int SessionSize = 20;
+    private const int SessionSize = 5;
 
     // Credit for a "partial" answer: between none (0) and half (0.5).
     private const float PartialCredit = 0.25f;
@@ -64,7 +64,7 @@ internal class Program
     // Weight per card in (0, 1): the smoothed share of credit missed. "correct" earns 1, "partial" PartialCredit, "incorrect" 0.
     // Always-correct cards approach 0, always-wrong cards approach 1, unseen cards start at 0.5.
     // The +1 / +2 smoothing keeps every weight strictly above 0, so no card is ever excluded from sampling.
-    private static float[] CardWeights(IReadOnlyList<LibraryCard> cards, IEnumerable<LogEntry> history)
+    private static float[] CardWeights(IReadOnlyList<LibraryQuestion> cards, IEnumerable<LogEntry> history)
     {
         var stats = history
             .Where(e => e.Verdict is not Verdict.Ungraded) // ungraded says nothing
@@ -96,13 +96,21 @@ internal class Program
         return weights;
     }
 
+    private const string LibraryFile = "civics-test-2025.json";
+
     private static Library LoadCardLibrary()
     {
-        var cards = JsonSerializer.Deserialize<Library>(File.ReadAllText("cards.json"))!;
-        foreach (var c in cards.Cards) Card.From(c); // fail fast on malformed cards
+        var library = JsonSerializer.Deserialize<Library>(File.ReadAllText(LibraryFile))
+            ?? throw new JsonException($"{LibraryFile} is empty.");
+        foreach (var q in library.Questions)
+        {
+            Card.From(q); // fail fast on malformed questions
+            if (!library.Categories.Contains(q.Category))
+                throw new JsonException($"Question {q.Number}: unknown category \"{q.Category}\".");
+        }
         var rand = Random.Shared; // new Random(0);
-        rand.Shuffle(CollectionsMarshal.AsSpan(cards.Cards));
-        return cards;
+        rand.Shuffle(CollectionsMarshal.AsSpan(library.Questions));
+        return library;
     }
 
     private static async Task<bool> AskAsync(int index, Card card, LlmClient llm, string model, Log log)
@@ -154,17 +162,22 @@ internal class Program
     private static void ShowStatistics(Log log)
     {
         var history = log.LoadLogEntries();
-        var counts = history.GroupBy(entry => entry.Verdict)
+        var counts = history.GroupBy(entry => entry.Verdict == Verdict.Correct ? "Correct" : "Incorrect")
                             .ToDictionary(g => g.Key, g => g.Count());
         var sum = counts.Values.Sum();
         var histogram = counts
-            .OrderBy(e => e.Key) // enum order: Correct, Partial, Incorrect, Ungraded
-            .Select(e => new { Key = e.Key.ToString(), e.Value, Percentage = (double)e.Value / sum * 100 })
-            .Append(new { Key = "Total", Value = sum, Percentage = 100.0 });
+            .OrderBy(e => e.Key)
+            .Select(e => new
+            {
+                Key = e.Key,
+                Count = e.Value,
+                Percentage = $"{((double)e.Value / sum * 100):F2}%",
+            })
+            .Append(new { Key = "Total", Count = sum, Percentage = "" });
 
         foreach (var group in histogram)
         {
-            Console.WriteLine($"    {group.Key,-10}: {group.Value,-4} ({group.Percentage:F2}%)");
+            Console.WriteLine($"    {group.Key,-10}: {group.Count,4} {group.Percentage}");
         }
     }
 }
