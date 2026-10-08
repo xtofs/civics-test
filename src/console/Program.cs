@@ -2,7 +2,7 @@
 // Uses LlmClient to encapsulate HttpClient while keeping the wire protocol visible.
 //
 // Run: start LM Studio's server on port 1234 and load a chat LLM (not an embedding model).
-//      dotnet run --project src/FlashGrader
+//      dotnet run --project src/console -- [--count N] [--category name]
 
 using System.Diagnostics;
 using System.Runtime.InteropServices;
@@ -15,6 +15,33 @@ internal class Program
     private static async Task Main(string[] args)
     {
         if (Debugger.IsAttached) { Environment.CurrentDirectory = Path.Combine(Environment.CurrentDirectory, "..", "..", "..", "..", ".."); }
+
+        var options = CommandLineOptions.Parse(args, out var error);
+        if (options is null)
+        {
+            if (error is not null) Console.Error.WriteLine(error);
+            (error is null ? Console.Out : Console.Error).WriteLine(CommandLineOptions.Usage);
+            Environment.ExitCode = error is null ? 0 : 2;
+            return;
+        }
+
+        var library = LoadCardLibrary();
+        var questions = library.Questions;
+        if (options.Category is not null)
+        {
+            // Only categories that actually have questions are valid choices.
+            var used = questions.GroupBy(q => q.Category).ToDictionary(g => g.Key, g => g.Count());
+            var category = used.Keys.FirstOrDefault(c => c.Equals(options.Category, StringComparison.OrdinalIgnoreCase));
+            if (category is null)
+            {
+                Console.Error.WriteLine($"Unknown category \"{options.Category}\". Available categories:");
+                foreach (var c in library.Categories.Where(used.ContainsKey))
+                    Console.Error.WriteLine($"    {c,-18} {used[c],3} questions");
+                Environment.ExitCode = 2;
+                return;
+            }
+            questions = questions.Where(q => q.Category == category).ToList();
+        }
 
         var log = new Log("logs");
 
@@ -38,15 +65,17 @@ internal class Program
         Console.WriteLine($"Using model: {model}");
 
 
-        var library = LoadCardLibrary();
-        var weights = CardWeights(library.Questions, log.LoadLogEntries());
-        var picked = Random.Shared.SampleProportional(weights, Math.Min(SessionSize, weights.Length));
-        var cards = picked.Select(i => Card.From(library.Questions[i])).ToList();
+        var sessionSize = Math.Min(options.Count, questions.Count);
+        var weights = CardWeights(questions, log.LoadLogEntries(), sessionSize);
+        var picked = Random.Shared.SampleProportional(weights, sessionSize);
+        var cards = picked.Select(i => Card.From(questions[i])).ToList();
 
-        Console.WriteLine($"testing {SessionSize} random cards");
-        for (int i = 0; i < SessionSize; i++)
+        var from = options.Category is null ? "" : $" from category {questions[0].Category}";
+        Console.WriteLine($"testing {cards.Count} random cards{from}");
+        for (int i = 0; i < cards.Count; i++)
         {
             var card = cards[i];
+            Console.Clear();
             Console.WriteLine();
             Console.WriteLine(new string('=', 80));
             await AskAsync(i, card, llm, model, log);
@@ -55,8 +84,6 @@ internal class Program
         ShowStatistics(log);
     }
 
-    private const int SessionSize = 5;
-
     // Credit for a "partial" answer: between none (0) and half (0.5).
     private const float PartialCredit = 0.25f;
 
@@ -64,7 +91,7 @@ internal class Program
     // Weight per card in (0, 1): the smoothed share of credit missed. "correct" earns 1, "partial" PartialCredit, "incorrect" 0.
     // Always-correct cards approach 0, always-wrong cards approach 1, unseen cards start at 0.5.
     // The +1 / +2 smoothing keeps every weight strictly above 0, so no card is ever excluded from sampling.
-    private static float[] CardWeights(IReadOnlyList<LibraryQuestion> cards, IEnumerable<LogEntry> history)
+    private static float[] CardWeights(IReadOnlyList<LibraryQuestion> cards, IEnumerable<LogEntry> history, int sessionSize)
     {
         var stats = history
             .Where(e => e.Verdict is not Verdict.Ungraded) // ungraded says nothing
@@ -86,7 +113,7 @@ internal class Program
         }).ToArray();
 
         // SampleProportional requires every weight <= sum / k; cap (rarely needed) until that holds.
-        var k = Math.Min(SessionSize, weights.Length);
+        var k = Math.Min(sessionSize, weights.Length);
         for (var pass = 0; pass < 20 && k > 0; pass++)
         {
             var cap = weights.Sum() / k;
