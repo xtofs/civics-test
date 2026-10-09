@@ -1,8 +1,6 @@
-// FlashGrader: minimal sketch of grading one flashcard answer with an LLM.
-// Uses LlmClient to encapsulate HttpClient while keeping the wire protocol visible.
-//
-// Run: start LM Studio's server on port 1234 and load a chat LLM (not an embedding model).
-//      dotnet run --project src/FlashGrader
+namespace console;
+
+
 
 public static class SamplingExtensions
 {

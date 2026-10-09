@@ -24,7 +24,7 @@ internal sealed class Log
         }
     }
 
-    public List<LogEntry> LoadLogEntries()
+    public IReadOnlyList<LogEntry> LoadLogEntries()
     {
         var entries = new List<LogEntry>();
         if (!Directory.Exists(_directory)) return entries;

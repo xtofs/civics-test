@@ -1,6 +1,6 @@
-// FlashGrader: minimal sketch of grading one flashcard answer with an LLM.
-// Uses LlmClient to encapsulate HttpClient while keeping the wire protocol visible.
-//
+namespace console;
+
+
 // Run: start LM Studio's server on port 1234 and load a chat LLM (not an embedding model).
 //      dotnet run --project src/console -- [--count N] [--category name]
 
@@ -75,7 +75,6 @@ internal class Program
         for (int i = 0; i < cards.Count; i++)
         {
             var card = cards[i];
-            Console.Clear();
             Console.WriteLine();
             Console.WriteLine(new string('=', 80));
             await AskAsync(i, card, llm, model, log);
@@ -156,6 +155,9 @@ internal class Program
             return false;
         }
 
+        Console.Clear();
+        Console.WriteLine($"Answer: {answer}");
+
         var color = grade.Verdict switch
         {
             Verdict.Correct => ConsoleColor.Green,
@@ -202,6 +204,9 @@ internal class Program
             })
             .Append(new { Key = "Total", Count = sum, Percentage = "" });
 
+
+        Console.WriteLine(new string('=', 80));
+        Console.WriteLine("   ");
         foreach (var group in histogram)
         {
             Console.WriteLine($"    {group.Key,-10}: {group.Count,4} {group.Percentage}");

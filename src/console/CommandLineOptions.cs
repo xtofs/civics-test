@@ -4,7 +4,7 @@ internal sealed record CommandLineOptions(int Count, string? Category)
     public const int DefaultCount = 20;
 
     public const string Usage = """
-        Usage: FlashGrader [options]
+        Usage: console [options]
 
         Options:
           -n, --count <N>          Number of questions to ask (default 20).
